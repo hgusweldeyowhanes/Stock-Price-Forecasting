@@ -1,0 +1,9 @@
+tensorflow>=2.16; python_version < "3.14"
+tf-nightly>=2.22.0.dev0; python_version >= "3.14"
+pandas>=2.1
+matplotlib>=3.8
+numpy>=1.26
+flask>=3.0
+flask-cors>=4.0
+gunicorn>=22.0
+pytest>=8.0

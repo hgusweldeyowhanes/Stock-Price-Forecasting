@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Stock Price Forecasting · LSTM</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0b1220;
+      --panel: #121a2b;
+      --line: #243049;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --gold: #fbbf24;
+      --green: #34d399;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 36px 20px 72px; }
+    h1 { font-size: 1.9rem; margin: 0 0 8px; font-weight: 600; }
+    .lede { color: var(--muted); max-width: 40rem; line-height: 1.5; margin: 0; }
+    .badge { color: var(--gold); font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 700; margin-bottom: 14px; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: 24px 0; }
+    .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+    .stat span { display: block; color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; }
+    .stat strong { font-size: 1.25rem; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; margin-top: 16px; }
+    canvas { max-height: 360px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+    a, button {
+      color: var(--bg);
+      background: var(--gold);
+      text-decoration: none;
+      border: 0;
+      border-radius: 999px;
+      padding: 8px 14px;
+      font: inherit;
+      cursor: pointer;
+    }
+    a.ghost, button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
+    .error { color: #fca5a5; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="badge">TensorFlow · Stacked LSTM · Sliding windows</div>
+    <h1>Stock Price Forecasting</h1>
+    <p class="lede">Next-day closing price from a 60-day window. The chart is the held-out test set: actual close vs stacked LSTM prediction.</p>
+    <div class="stats">
+      <div class="stat"><span>RMSE</span><strong id="rmse">—</strong></div>
+      <div class="stat"><span>MAE</span><strong id="mae">—</strong></div>
+      <div class="stat"><span>MAPE</span><strong id="mape">—</strong></div>
+      <div class="stat"><span>Lookback</span><strong id="lookback">60</strong></div>
+    </div>
+    <section class="card">
+      <h2 style="margin:0 0 12px;font-size:1rem;">Predicted vs actual</h2>
+      <canvas id="overlay"></canvas>
+      <div class="row">
+        <a href="/api/chart.png" target="_blank">Matplotlib PNG</a>
+        <a class="ghost" href="/api/chart.png?kind=forecast" target="_blank">Forecast PNG</a>
+      </div>
+    </section>
+    <section class="card">
+      <h2 style="margin:0 0 12px;font-size:1rem;">Next 7 sessions</h2>
+      <canvas id="future"></canvas>
+      <p id="error" class="error" hidden></p>
+    </section>
+  </div>
+  <script>
+    const errorEl = document.getElementById("error");
+    const chartOpts = {
+      responsive: true,
+      plugins: { legend: { labels: { color: "#e5e7eb" } } },
+      scales: {
+        x: { ticks: { color: "#9ca3af", maxTicksLimit: 8 }, grid: { color: "#1f2937" } },
+        y: { ticks: { color: "#9ca3af" }, grid: { color: "#1f2937" } },
+      },
+    };
+
+    async function boot() {
+      const health = await fetch("/api/health").then((r) => r.json());
+      if (!health.model_ready) {
+        errorEl.hidden = false;
+        errorEl.textContent = "Training the demo model… this can take a minute.";
+        const trained = await fetch("/api/train", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ epochs: 12, lookback: 60 }),
+        });
+        if (!trained.ok) throw new Error("Training failed");
+      }
+      const evalRes = await fetch("/api/evaluate");
+      const data = await evalRes.json();
+      if (!evalRes.ok) throw new Error(data.detail || "Evaluate failed");
+      document.getElementById("rmse").textContent = data.metrics.rmse;
+      document.getElementById("mae").textContent = data.metrics.mae;
+      document.getElementById("mape").textContent = data.metrics.mape + "%";
+      document.getElementById("lookback").textContent = data.lookback;
+      new Chart(document.getElementById("overlay"), {
+        type: "line",
+        data: {
+          labels: data.dates.slice(-120),
+          datasets: [
+            { label: "Actual", data: data.actual.slice(-120), borderColor: "#e5e7eb", tension: 0.15, pointRadius: 0, borderWidth: 2 },
+            { label: "LSTM predicted", data: data.predicted.slice(-120), borderColor: "#fbbf24", tension: 0.15, pointRadius: 0, borderWidth: 2 },
+          ],
+        },
+        options: chartOpts,
+      });
+      const future = await fetch("/api/forecast?horizon=7").then((r) => r.json());
+      new Chart(document.getElementById("future"), {
+        type: "line",
+        data: {
+          labels: future.dates,
+          datasets: [{ label: "Forecast close", data: future.forecast, borderColor: "#34d399", tension: 0.2, pointRadius: 3, borderWidth: 2 }],
+        },
+        options: chartOpts,
+      });
+      errorEl.hidden = true;
+    }
+
+    boot().catch((err) => {
+      errorEl.hidden = false;
+      errorEl.textContent = err.message;
+    });
+  </script>
+</body>
+</html>
