@@ -6,7 +6,7 @@ TensorFlow needs about **2 GB RAM**. Use a Standard web service.
 
 ```bash
 git add -A
-git commit -m "Add stacked LSTM stock close forecasting."
+git commit -m "Stock forecasting: returns LSTM, baselines, tickers, uncertainty bands."
 git push origin main
 ```
 
@@ -20,7 +20,9 @@ git push origin main
 | Health | `/api/health` |
 | Instance | Standard |
 
-Train locally and commit `artifacts/model.keras` plus `artifacts/meta.json` so Render does not train on boot.
+Keep `--workers 1`. Training jobs and their status live in the web process, so a second worker would not see jobs started by the first.
+
+The DEMO model is committed in `artifacts/DEMO/`, so the site works on first boot without training.
 
 ## 3. Environment
 
@@ -28,6 +30,20 @@ Train locally and commit `artifacts/model.keras` plus `artifacts/meta.json` so R
 PYTHON_VERSION=3.12.8
 ALLOWED_ORIGINS=*
 TF_CPP_MIN_LOG_LEVEL=2
+DEFAULT_TICKER=DEMO
+TRAIN_API_KEY=<long random string>
 ```
 
-If no artifacts are in the repo, the demo page will POST `/api/train` on first visit (slow, easy to time out).
+- Without `TRAIN_API_KEY`, `POST /api/train` returns 403 and only committed models are served.
+- With it, the UI shows a training panel for untrained tickers. Training runs in the background (1–3 minutes on CPU) and the browser polls `GET /api/train/<job_id>`.
+
+## 4. Persistence
+
+Render's filesystem is ephemeral. Models trained through the API, and the yfinance price cache, disappear on redeploy or restart. To keep a real-ticker model, train it locally and commit it:
+
+```bash
+python -m src.train --ticker AAPL
+git add -f artifacts/AAPL
+```
+
+(`.gitignore` only includes `artifacts/DEMO/` by default.) Or attach a Render persistent disk mounted at `artifacts/`.

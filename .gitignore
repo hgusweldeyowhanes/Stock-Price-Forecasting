@@ -12,3 +12,7 @@ venv/
 *.log
 artifacts/*.png
 .cache/
+data/cache/
+# Only the DEMO model is committed; models for real tickers are trained on demand.
+artifacts/*
+!artifacts/DEMO/

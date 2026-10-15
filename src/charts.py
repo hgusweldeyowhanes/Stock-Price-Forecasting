@@ -10,11 +10,15 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
-def predicted_vs_actual_png(dates, actual, predicted, title: str = "Predicted vs actual close") -> bytes:
+def predicted_vs_actual_png(
+    dates, actual, predicted, naive=None, title: str = "Predicted vs actual close"
+) -> bytes:
     fig, ax = plt.subplots(figsize=(10.5, 4.6), dpi=140)
     fig.patch.set_facecolor("#111827")
     ax.set_facecolor("#111827")
     ax.plot(range(len(actual)), actual, color="#e5e7eb", linewidth=1.8, label="Actual")
+    if naive is not None:
+        ax.plot(range(len(naive)), naive, color="#6b7280", linewidth=1.2, linestyle="--", label="Naive (last close)")
     ax.plot(range(len(predicted)), predicted, color="#fbbf24", linewidth=1.8, label="LSTM predicted")
     ax.set_title(title, color="#f9fafb", loc="left", fontsize=13, pad=10)
     ax.set_ylabel("Close", color="#d1d5db")
@@ -34,7 +38,9 @@ def predicted_vs_actual_png(dates, actual, predicted, title: str = "Predicted vs
     return buffer.getvalue()
 
 
-def history_and_forecast_png(history_dates, history_close, forecast_dates, forecast_close) -> bytes:
+def history_and_forecast_png(
+    history_dates, history_close, forecast_dates, forecast_close, lower=None, upper=None
+) -> bytes:
     fig, ax = plt.subplots(figsize=(10.5, 4.6), dpi=140)
     fig.patch.set_facecolor("#111827")
     ax.set_facecolor("#111827")
@@ -42,7 +48,17 @@ def history_and_forecast_png(history_dates, history_close, forecast_dates, forec
     offset = len(history_close) - 1
     xs = list(range(offset, offset + len(forecast_close) + 1))
     ys = [history_close[-1], *forecast_close]
-    ax.plot(xs, ys, color="#34d399", linewidth=2, label="Forecast")
+    if lower is not None and upper is not None:
+        ax.fill_between(
+            xs,
+            [history_close[-1], *lower],
+            [history_close[-1], *upper],
+            color="#34d399",
+            alpha=0.18,
+            linewidth=0,
+            label="10–90% band",
+        )
+    ax.plot(xs, ys, color="#34d399", linewidth=2, label="Forecast (median)")
     ax.set_title("Close history and LSTM forecast", color="#f9fafb", loc="left", fontsize=13, pad=10)
     ax.set_ylabel("Close", color="#d1d5db")
     ax.tick_params(colors="#9ca3af")

@@ -14,6 +14,7 @@
       --muted: #9ca3af;
       --gold: #fbbf24;
       --green: #34d399;
+      --red: #f87171;
     }
     * { box-sizing: border-box; }
     body {
@@ -24,15 +25,38 @@
     }
     .wrap { max-width: 1080px; margin: 0 auto; padding: 36px 20px 72px; }
     h1 { font-size: 1.9rem; margin: 0 0 8px; font-weight: 600; }
-    .lede { color: var(--muted); max-width: 40rem; line-height: 1.5; margin: 0; }
+    h2 { margin: 0 0 12px; font-size: 1rem; }
+    .lede { color: var(--muted); max-width: 44rem; line-height: 1.5; margin: 0; }
     .badge { color: var(--gold); font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 700; margin-bottom: 14px; }
-    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: 24px 0; }
+    .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 22px; }
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+    .chip { font-size: 0.8rem; padding: 4px 10px; }
+    .source { color: var(--muted); font-size: 0.85rem; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: 20px 0; }
     .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
     .stat span { display: block; color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; }
     .stat strong { font-size: 1.25rem; }
+    .good { color: var(--green); }
+    .bad { color: var(--red); }
     .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; margin-top: 16px; }
+    .note { color: var(--muted); font-size: 0.85rem; line-height: 1.5; margin: 10px 0 0; }
     canvas { max-height: 360px; }
-    .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+    th, td { text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+    th:first-child, td:first-child { text-align: left; }
+    th { color: var(--muted); font-weight: 500; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    tr.best td { color: var(--green); }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; align-items: center; }
+    input {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 8px 14px;
+      font: inherit;
+    }
+    input.ticker { width: 120px; text-transform: uppercase; }
+    input.small { width: 90px; }
     a, button {
       color: var(--bg);
       background: var(--gold);
@@ -43,92 +67,254 @@
       font: inherit;
       cursor: pointer;
     }
+    button:disabled { opacity: 0.6; cursor: wait; }
     a.ghost, button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
     .error { color: #fca5a5; }
+    [hidden] { display: none !important; }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="badge">TensorFlow · Stacked LSTM · Sliding windows</div>
+    <div class="badge">TensorFlow · Stacked LSTM · Next-day returns</div>
     <h1>Stock Price Forecasting</h1>
-    <p class="lede">Next-day closing price from a 60-day window. The chart is the held-out test set: actual close vs stacked LSTM prediction.</p>
-    <div class="stats">
-      <div class="stat"><span>RMSE</span><strong id="rmse">—</strong></div>
-      <div class="stat"><span>MAE</span><strong id="mae">—</strong></div>
-      <div class="stat"><span>MAPE</span><strong id="mape">—</strong></div>
-      <div class="stat"><span>Lookback</span><strong id="lookback">60</strong></div>
+    <p class="lede">
+      A stacked LSTM reads 60 days of OHLCV features (returns, range, volume, moving-average gaps, RSI) and predicts
+      tomorrow's return. It is scored on a held-out test period against simple baselines it has to beat.
+    </p>
+
+    <div class="toolbar">
+      <input id="ticker" class="ticker" placeholder="DEMO" aria-label="Ticker" />
+      <button id="load">Load</button>
+      <div id="chips" class="chips"></div>
+      <span id="source" class="source"></span>
     </div>
-    <section class="card">
-      <h2 style="margin:0 0 12px;font-size:1rem;">Predicted vs actual</h2>
-      <canvas id="overlay"></canvas>
+    <p id="error" class="error" hidden></p>
+
+    <div id="results" hidden>
+      <div class="stats">
+        <div class="stat"><span>LSTM RMSE</span><strong id="rmse">—</strong></div>
+        <div class="stat"><span>Naive RMSE</span><strong id="naive">—</strong></div>
+        <div class="stat"><span>Skill vs naive</span><strong id="skill">—</strong></div>
+        <div class="stat"><span>Direction hit rate</span><strong id="direction">—</strong></div>
+        <div class="stat"><span>MAPE</span><strong id="mape">—</strong></div>
+        <div class="stat"><span>Lookback</span><strong id="lookback">—</strong></div>
+      </div>
+
+      <section class="card">
+        <h2>Model comparison (test set)</h2>
+        <table>
+          <thead><tr><th>Model</th><th>RMSE</th><th>MAE</th><th>MAPE %</th><th>Direction %</th></tr></thead>
+          <tbody id="comparison"></tbody>
+        </table>
+        <p class="note">
+          Naive = "tomorrow closes where today closed". Drift adds the average training return, MA5 is the 5-day average,
+          Ridge is a linear model on the last 5 days of features. Skill is how much lower the LSTM's RMSE is than naive's.
+        </p>
+      </section>
+
+      <section class="card">
+        <h2>Predicted vs actual</h2>
+        <canvas id="overlay"></canvas>
+        <div class="row">
+          <a id="overlayPng" href="#" target="_blank">Matplotlib PNG</a>
+          <a id="forecastPng" class="ghost" href="#" target="_blank">Forecast PNG</a>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Next 7 sessions</h2>
+        <canvas id="future"></canvas>
+        <p class="note" id="forecastNote"></p>
+      </section>
+    </div>
+
+    <section class="card" id="trainCard" hidden>
+      <h2 id="trainTitle">Train a model</h2>
+      <p class="note" id="trainHint"></p>
       <div class="row">
-        <a href="/api/chart.png" target="_blank">Matplotlib PNG</a>
-        <a class="ghost" href="/api/chart.png?kind=forecast" target="_blank">Forecast PNG</a>
+        <input id="apiKey" type="password" placeholder="API key" autocomplete="off" />
+        <input id="epochs" class="small" type="number" min="1" max="60" value="25" aria-label="Epochs" />
+        <button id="trainBtn">Train</button>
+        <span id="trainStatus" class="source"></span>
       </div>
     </section>
-    <section class="card">
-      <h2 style="margin:0 0 12px;font-size:1rem;">Next 7 sessions</h2>
-      <canvas id="future"></canvas>
-      <p id="error" class="error" hidden></p>
-    </section>
+
+    <p class="note">Portfolio demo, not investment advice.</p>
   </div>
   <script>
-    const errorEl = document.getElementById("error");
+    const $ = (id) => document.getElementById(id);
+    const charts = {};
     const chartOpts = {
       responsive: true,
-      plugins: { legend: { labels: { color: "#e5e7eb" } } },
+      plugins: { legend: { labels: { color: "#e5e7eb", filter: (item) => item.text !== "_lower" } } },
       scales: {
         x: { ticks: { color: "#9ca3af", maxTicksLimit: 8 }, grid: { color: "#1f2937" } },
         y: { ticks: { color: "#9ca3af" }, grid: { color: "#1f2937" } },
       },
     };
+    const MODEL_LABELS = { lstm: "LSTM", naive: "Naive", drift: "Drift", ma5: "MA5", ridge: "Ridge" };
 
-    async function boot() {
-      const health = await fetch("/api/health").then((r) => r.json());
-      if (!health.model_ready) {
-        errorEl.hidden = false;
-        errorEl.textContent = "Training the demo model… this can take a minute.";
-        const trained = await fetch("/api/train", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ epochs: 12, lookback: 60 }),
-        });
-        if (!trained.ok) throw new Error("Training failed");
-      }
-      const evalRes = await fetch("/api/evaluate");
-      const data = await evalRes.json();
-      if (!evalRes.ok) throw new Error(data.detail || "Evaluate failed");
-      document.getElementById("rmse").textContent = data.metrics.rmse;
-      document.getElementById("mae").textContent = data.metrics.mae;
-      document.getElementById("mape").textContent = data.metrics.mape + "%";
-      document.getElementById("lookback").textContent = data.lookback;
-      new Chart(document.getElementById("overlay"), {
-        type: "line",
-        data: {
-          labels: data.dates.slice(-120),
-          datasets: [
-            { label: "Actual", data: data.actual.slice(-120), borderColor: "#e5e7eb", tension: 0.15, pointRadius: 0, borderWidth: 2 },
-            { label: "LSTM predicted", data: data.predicted.slice(-120), borderColor: "#fbbf24", tension: 0.15, pointRadius: 0, borderWidth: 2 },
-          ],
-        },
-        options: chartOpts,
-      });
-      const future = await fetch("/api/forecast?horizon=7").then((r) => r.json());
-      new Chart(document.getElementById("future"), {
-        type: "line",
-        data: {
-          labels: future.dates,
-          datasets: [{ label: "Forecast close", data: future.forecast, borderColor: "#34d399", tension: 0.2, pointRadius: 3, borderWidth: 2 }],
-        },
-        options: chartOpts,
-      });
-      errorEl.hidden = true;
+    function currentTicker() {
+      return ($("ticker").value.trim() || new URLSearchParams(location.search).get("ticker") || "DEMO").toUpperCase();
     }
 
-    boot().catch((err) => {
-      errorEl.hidden = false;
-      errorEl.textContent = err.message;
-    });
+    function showError(message) {
+      $("error").hidden = !message;
+      $("error").textContent = message || "";
+    }
+
+    async function getJson(url, options) {
+      const res = await fetch(url, options);
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw Object.assign(new Error(body.detail || res.statusText), { status: res.status });
+      return body;
+    }
+
+    function drawChart(id, config) {
+      if (charts[id]) charts[id].destroy();
+      charts[id] = new Chart($(id), { ...config, options: chartOpts });
+    }
+
+    function renderChips(tickers, active) {
+      const box = $("chips");
+      box.replaceChildren();
+      for (const t of tickers) {
+        const chip = document.createElement("button");
+        chip.className = t === active ? "chip" : "chip ghost";
+        chip.textContent = t;
+        chip.onclick = () => { $("ticker").value = t; load(); };
+        box.appendChild(chip);
+      }
+    }
+
+    function renderComparison(comparison) {
+      const body = $("comparison");
+      body.replaceChildren();
+      const bestRmse = Math.min(...Object.values(comparison).map((row) => row.rmse));
+      for (const [name, row] of Object.entries(comparison)) {
+        const tr = document.createElement("tr");
+        if (row.rmse === bestRmse) tr.className = "best";
+        const cells = [MODEL_LABELS[name] || name, row.rmse, row.mae, row.mape, row.direction_acc ?? "—"];
+        for (const value of cells) {
+          const td = document.createElement("td");
+          td.textContent = value;
+          tr.appendChild(td);
+        }
+        body.appendChild(tr);
+      }
+    }
+
+    function showTraining(ticker, health, reason) {
+      $("trainCard").hidden = false;
+      $("trainTitle").textContent = `Train ${ticker}`;
+      $("trainHint").textContent = health.training_enabled
+        ? `${reason} Training runs in the background (about 1–3 minutes on CPU) and needs the server's API key.`
+        : `${reason} Training over HTTP is disabled on this server. Run: python -m src.train --ticker ${ticker}`;
+      $("apiKey").hidden = $("epochs").hidden = $("trainBtn").hidden = !health.training_enabled;
+      $("apiKey").value = sessionStorage.getItem("trainKey") || "";
+    }
+
+    async function load() {
+      const ticker = currentTicker();
+      $("ticker").value = ticker;
+      history.replaceState(null, "", `?ticker=${encodeURIComponent(ticker)}`);
+      showError("");
+      $("source").textContent = "";
+      $("trainStatus").textContent = "";
+      const q = `ticker=${encodeURIComponent(ticker)}`;
+      try {
+        const health = await getJson(`/api/health?${q}`);
+        renderChips(health.trained_tickers, ticker);
+        if (!health.model_ready) {
+          $("results").hidden = true;
+          showTraining(ticker, health, `No trained model for ${ticker} yet.`);
+          return;
+        }
+        $("trainCard").hidden = true;
+        if (health.training_enabled) showTraining(ticker, health, `Retrain ${ticker} on the latest prices.`);
+
+        const data = await getJson(`/api/evaluate?${q}`);
+        $("source").textContent = `Source: ${data.source}`;
+        const m = data.metrics;
+        $("rmse").textContent = m.rmse;
+        $("naive").textContent = m.naive_rmse;
+        $("skill").textContent = `${m.skill_vs_naive > 0 ? "+" : ""}${m.skill_vs_naive}%`;
+        $("skill").className = m.skill_vs_naive > 0 ? "good" : "bad";
+        $("direction").textContent = m.direction_acc == null ? "—" : `${m.direction_acc}%`;
+        $("mape").textContent = `${m.mape}%`;
+        $("lookback").textContent = data.lookback;
+        renderComparison(data.comparison);
+        $("overlayPng").href = `/api/chart.png?${q}`;
+        $("forecastPng").href = `/api/chart.png?kind=forecast&${q}`;
+        $("results").hidden = false;
+
+        const n = 120;
+        drawChart("overlay", {
+          type: "line",
+          data: {
+            labels: data.dates.slice(-n),
+            datasets: [
+              { label: "Actual", data: data.actual.slice(-n), borderColor: "#e5e7eb", tension: 0.15, pointRadius: 0, borderWidth: 2 },
+              { label: "Naive (last close)", data: data.naive.slice(-n), borderColor: "#6b7280", borderDash: [5, 4], tension: 0.15, pointRadius: 0, borderWidth: 1.2 },
+              { label: "LSTM predicted", data: data.predicted.slice(-n), borderColor: "#fbbf24", tension: 0.15, pointRadius: 0, borderWidth: 2 },
+            ],
+          },
+        });
+
+        const future = await getJson(`/api/forecast?horizon=7&${q}`);
+        $("forecastNote").textContent =
+          `Median of ${future.paths} simulated paths from the ${future.last_date} close (${future.last_close}). ` +
+          `The band is the 10th–90th percentile: dropout stays on and noise is sized from test-set errors, so it widens each day.`;
+        drawChart("future", {
+          type: "line",
+          data: {
+            labels: future.dates,
+            datasets: [
+              { label: "10–90% band", data: future.upper, borderColor: "rgba(52,211,153,0.35)", backgroundColor: "rgba(52,211,153,0.15)", fill: "+1", pointRadius: 0, borderWidth: 1 },
+              { label: "_lower", data: future.lower, borderColor: "rgba(52,211,153,0.35)", pointRadius: 0, borderWidth: 1 },
+              { label: "Forecast (median)", data: future.forecast, borderColor: "#34d399", tension: 0.2, pointRadius: 3, borderWidth: 2 },
+            ],
+          },
+        });
+      } catch (err) {
+        $("results").hidden = true;
+        showError(err.message);
+      }
+    }
+
+    async function startTraining() {
+      const ticker = currentTicker();
+      const key = $("apiKey").value.trim();
+      sessionStorage.setItem("trainKey", key);
+      $("trainBtn").disabled = true;
+      $("trainStatus").textContent = "Queuing…";
+      try {
+        const { job } = await getJson("/api/train", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-API-Key": key },
+          body: JSON.stringify({ ticker, epochs: Number($("epochs").value) || 25 }),
+        });
+        let state = job;
+        while (state.status === "queued" || state.status === "running") {
+          $("trainStatus").textContent = `${state.status}…`;
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+          state = await getJson(`/api/train/${job.id}`);
+        }
+        if (state.status === "failed") throw new Error(`Training failed: ${state.error}`);
+        $("trainStatus").textContent = "Done.";
+        await load();
+      } catch (err) {
+        $("trainStatus").textContent = "";
+        showError(err.message);
+      } finally {
+        $("trainBtn").disabled = false;
+      }
+    }
+
+    $("load").onclick = load;
+    $("ticker").addEventListener("keydown", (e) => { if (e.key === "Enter") load(); });
+    $("trainBtn").onclick = startTraining;
+    load();
   </script>
 </body>
 </html>
